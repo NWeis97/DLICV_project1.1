@@ -14,7 +14,6 @@ import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 
 
-
 # Get CUDA
 if torch.cuda.is_available():
     print("The code will run on GPU.")
@@ -63,16 +62,3 @@ trainset = Hotdog_NotHotdog(train=True, transform=train_transform)
 train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=3)
 testset = Hotdog_NotHotdog(train=False, transform=test_transform)
 test_loader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=3)
-
-
-"""
-images, labels = next(iter(train_loader))
-plt.figure(figsize=(20,10))
-
-for i in range(21):
-    plt.subplot(5,7,i+1)
-    plt.imshow(np.swapaxes(np.swapaxes(images[i].numpy(), 0, 2), 0, 1))
-    plt.title(['hotdog', 'not hotdog'][labels[i].item()])
-    plt.axis('off')
-"""
-
