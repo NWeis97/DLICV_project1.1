@@ -15,6 +15,9 @@ import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
 import pdb
 
+import cv2 as cv
+import numpy as np
+import sys
 
 # Get CUDA
 if torch.cuda.is_available():
@@ -98,7 +101,7 @@ class TACO(torch.utils.data.Dataset):
         for i in range(len(anns)):
             self.categories[anns[i]['image_id']].append(anns[i]['category_id'])
             self.ids[anns[i]['image_id']].append(anns[i]['id'])
-            self.bboxs[anns[i]['image_id']].append(anns[i]['bbox'])
+            self.bboxs[anns[i]['image_id']].append(np.array(anns[i]['bbox']).astype(int))
         """
         # Select train, val, or test
         rand_perm = np.random.permutation(range(len(imgs)))
@@ -126,22 +129,39 @@ class TACO(torch.utils.data.Dataset):
         image_path = self.image_paths[idx]
         
         image = Image.open(image_path)
-        transf = transforms.Pad([0,0,6000-image.size[0],5312-image.size[1]])
-        image = transf(image)
         X = self.transform(image)
         y = self.categories[idx]
         index = self.ids[idx]
         bbox = self.bboxs[idx]
-        return X, y, index, bbox
+        return image_path, y, index, bbox
+
+def edge_boxes(model,image_path, max_boxes=100):
+    #image = Image.open(image_path)
+    im = cv.imread(image_path)
+        #transforms(image))
+
+    edge_detection = cv.ximgproc.createStructuredEdgeDetection(model)
+    rgb_im = cv.cvtColor(im, cv.COLOR_BGR2RGB)
+    edges = edge_detection.detectEdges(np.float32(rgb_im) / 255.0)
+
+    orimap = edge_detection.computeOrientation(edges)
+    edges = edge_detection.edgesNms(edges, orimap)
+
+    edge_boxes = cv.ximgproc.createEdgeBoxes()
+    edge_boxes.setMaxBoxes(max_boxes)
+    boxes = edge_boxes.getBoundingBoxes(edges, orimap)
+
+    return boxes
+
+
 
 # Load data
 train_test_transform = transforms.Compose([transforms.ToTensor()])
-trainset = TACO(data = 'train', transform=train_test_transform, seed=seed)
-train_loader = DataLoader(trainset, batch_size=1, shuffle=False, num_workers=0)
-pdb.set_trace()
-max_height = 0
-max_width = 0
-for minibatch_no, (data, targets, _, bboxs) in enumerate(train_loader):
-    print(minibatch_no)
-pdb.set_trace()
+trainset_taco = TACO(data = 'train', transform=train_test_transform, seed=seed)
+train_loader_taco = DataLoader(trainset_taco, batch_size=1, shuffle=False, num_workers=0)
 
+
+
+test,_,_,_ = trainset_taco.__getitem__(0)
+boxes = edge_boxes("models/model.yml.gz",test )
+pdb.set_trace()
