@@ -331,6 +331,10 @@ test_loader = DataLoader(test_dataset, batch_size=32, shuffle=True, num_workers=
 
 
 
+
+
+
+
 # Get model
 efficientnet = torch.hub.load('NVIDIA/DeepLearningExamples:torchhub', 'nvidia_efficientnet_b0', pretrained=True)
 # Freeze parameters for pretrained model (to avoid overfitting)
@@ -407,3 +411,48 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
     out_dict['train_loss'].append(np.mean(train_loss))
     out_dict['test_loss'].append(np.mean(test_loss))
     print("Accuracy train: {train:.1f}%\t test: {test:.1f}%".format(test=100*test_acc, train=100*train_acc))
+
+
+torch.save(model)
+
+
+
+#### TASK 3 #####
+
+model = torch.load("model")
+model.eval()
+test_loss = []
+test_correct = 0
+for minibatch_no, (data, target, img_index, obj_index, box, IoU_val) in enumerate(test_loader):
+    data, target = data.to(device), target.to(device)
+    target = target + 1
+    target[target==30] = 28
+    with torch.no_grad():
+        output = model(data) #64*29
+        output = nn.softmax(output,dim=1) # softmax to get probs
+
+    
+    # within each image
+        # FOr each class
+            # Sort proposals according to prob of class
+            # Remove proposals with p lower than 'threshold'
+            # for each (sorted) prop going from largest prob to lowest
+                #Calc IoU to all other proposals
+                #Remove those with IoU over k
+
+    test_loss.append(loss_fun(output, target).cpu().item())
+    predicted = output.argmax(1)
+    test_correct += (target==predicted).sum().cpu().item()
+    print(f'{minibatch_no+1}/{len(val_loader)}')
+
+# Output list of proposals with class and prob
+# ...
+
+
+#### TASK 4 #####
+# Input: list of proposals with class and prob
+
+
+
+#### Task 5 ####
+# Make code for visualizing objects and detections for an image
