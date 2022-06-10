@@ -75,7 +75,7 @@ print('Number of images:', nr_images)
 map_category_to_super = {}
 for i in range(nr_cats):
     super_cat = dataset['categories'][i]['supercategory']
-    map_category_to_super[i] = super_cat_names.index(super_cat)-1
+    map_category_to_super[i] = super_cat_names.index(super_cat)
 
 
 # Define TACO data class (IMPORTANT: USE SAME SEED FOR TRAIN, VAL, AND TEST)
@@ -303,7 +303,7 @@ size = 224
 train_test_transform = transforms.Compose([transforms.Resize((size, size)), 
                                            transforms.ToTensor()])
 
-
+"""
 # save datasets
 train_dataset = Proposals(train_loader_taco, train_test_transform, "models/model.yml.gz", data_path=dataset_path,max_boxes=500, num_bg_examples=40)
 torch.save(train_dataset,'models/datasets/train_dataset_taco.pt')
@@ -314,7 +314,7 @@ print('Saved val dataset')
 test_dataset = Proposals(test_loader_taco, train_test_transform, "models/model.yml.gz", data_path=dataset_path,max_boxes=100)
 torch.save(test_dataset,'models/datasets/test_dataset_taco.pt')
 print('Saved test dataset')
-
+"""
 
 
 # Load train, val, and test datasets
@@ -324,9 +324,9 @@ test_dataset = torch.load('models/datasets/test_dataset_taco.pt')
 
 
 # Include in data loader
-train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True, num_workers=0)
-val_loader = DataLoader(val_dataset, batch_size=64, shuffle=True, num_workers=0)
-test_loader = DataLoader(test_dataset, batch_size=64, shuffle=True, num_workers=0)
+train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0)
+val_loader = DataLoader(val_dataset, batch_size=32, shuffle=True, num_workers=0)
+test_loader = DataLoader(test_dataset, batch_size=32, shuffle=True, num_workers=0)
 
 
 
@@ -340,7 +340,7 @@ efficientnet.to(device)
 
 # Change model classifier to hotdog/notdog (don't freeze params of last layer)
 num_ftrs = efficientnet.classifier.fc.in_features
-efficientnet.classifier.fc = nn.Linear(num_ftrs, 30)
+efficientnet.classifier.fc = nn.Linear(num_ftrs, 29)
 
 # Set optimizer and model
 model = efficientnet.to(device)
@@ -364,7 +364,11 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
     for minibatch_no, (data, target, img_index, obj_index, box, IoU_val) in tqdm(enumerate(train_loader), total=len(train_loader)):
 
         data, target = data.to(device), target.to(device)
+        target = target + 1
+        target[target==30] = 28
         print(f'{minibatch_no+1}/{len(train_loader)}')
+        print(torch.min(target))
+        print(torch.max(target))
         #Zero the gradients computed for each weight
         optimizer.zero_grad()
         #Forward pass your image through the network
@@ -387,6 +391,8 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
     test_correct = 0
     for minibatch_no, (data, target, img_index, obj_index, box, IoU_val) in enumerate(val_loader):
         data, target = data.to(device), target.to(device)
+        target = target + 1
+        target[target==30] = 28
         with torch.no_grad():
             output = model(data)
         test_loss.append(loss_fun(output, target).cpu().item())
