@@ -1,4 +1,5 @@
 # Import 
+from operator import index
 import os
 import numpy as np
 import glob
@@ -12,6 +13,7 @@ import torch.nn.functional as F
 import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
+import torchvision.models as models
 import matplotlib.pyplot as plt
 import pdb
 import re
@@ -199,9 +201,8 @@ def assign_to_box(list_of_GT_boxes,box):
 
 # Define TACO data class (IMPORTANT: USE SAME SEED FOR TRAIN, VAL, AND TEST)
 class Proposals(torch.utils.data.Dataset):
-    def __init__(self, data_loader, transform, model_edge_boxes, data_path=dataset_path, max_boxes=100, num_bg_examples=None):
+    def __init__(self, data_loader,  model_edge_boxes, data_path=dataset_path, max_boxes=2000, train_val=True):
         'Initialization'
-        self.transform = transform
         self.data_path = data_path
 
         self.proposal_image_paths = [] #path to image
@@ -215,7 +216,19 @@ class Proposals(torch.utils.data.Dataset):
         for enum, (image_path, target, object_ids, image_ids, bboxs) in enumerate(data_loader):
             # Get boxes
             proposal_boxes = edge_boxes(model_edge_boxes,image_path[0],max_boxes=max_boxes)
+            
+            proposal_boxes = [box.tolist() for box in proposal_boxes]
+            path_splits = image_path[0].split('/')
 
+            if train_val is True: #Include GT for training
+                self.proposal_image_paths.extend([path_splits[-2]+'/'+path_splits[-1]]*len(target))
+                self.proposal_image_ids.extend([image_ids[0].item()]*len(target))
+                self.proposal_object_ids.extend(obj.numpy().item() for obj in object_ids)
+                self.proposal_box.extend([box.numpy().tolist()[0] for box in bboxs])
+                self.proposal_class.extend([tar.numpy().item() for tar in target])
+                self.proposal_IoU.extend([1]*len(target))
+            
+            
             # Init lists
             indx_bg = []
             indx_save = []
@@ -231,27 +244,29 @@ class Proposals(torch.utils.data.Dataset):
                 max_IoU_list.append(max_IoU)
                 proposal_object_ids_list.append(object_ids[box_indx].item())
 
-                if max_IoU >= 0.5:
+                if max_IoU >= 0.7:
                     proposal_class_list.append(target[box_indx].item())
                     indx_save.append(indx_bo)
-                else:
-                    proposal_class_list.append(29)
+                elif max_IoU < 0.3:
+                    proposal_class_list.append(28)
                     indx_bg.append(indx_bo)
-
-
-            path_splits = image_path[0].split('/')
+                else:
+                    proposal_class_list.append(28)
+            
 
             # Remove most bg proposals or not
-            if num_bg_examples is None:
-                self.proposal_image_paths.extend([path_splits[-2]+'/'+path_splits[-1]]*max_boxes)
-                self.proposal_image_ids.extend([image_ids[0].item()]*max_boxes)
-                self.proposal_box.extend(proposal_boxes)
-                self.proposal_IoU.extend(max_IoU_list)
-                self.proposal_object_ids.extend(proposal_object_ids_list)
-                self.proposal_class.extend(proposal_class_list)
+            #if train_val is False:
+            self.proposal_image_paths.extend([path_splits[-2]+'/'+path_splits[-1]]*len(proposal_boxes))
+            self.proposal_image_ids.extend([image_ids[0].item()]*len(proposal_boxes))
+            self.proposal_box.extend(proposal_boxes)
+            self.proposal_IoU.extend(max_IoU_list)
+            self.proposal_object_ids.extend(proposal_object_ids_list)
+            self.proposal_class.extend(proposal_class_list)
+            """
             else:
+                num_pos = len(target[0]) + len(indx_save)
                 indx_bg = np.random.permutation(indx_bg)
-                indx_bg = indx_bg[:num_bg_examples]
+                indx_bg = indx_bg[:num_pos*3]
                 indx_save.extend(indx_bg) 
                 self.proposal_image_paths.extend([path_splits[-2]+'/'+path_splits[-1]]*len(indx_save))
                 self.proposal_image_ids.extend([image_ids[0].item()]*len(indx_save))
@@ -259,9 +274,12 @@ class Proposals(torch.utils.data.Dataset):
                 self.proposal_IoU.extend([max_IoU_list[i] for i in indx_save])
                 self.proposal_object_ids.extend([proposal_object_ids_list[i] for i in indx_save])
                 self.proposal_class.extend([proposal_class_list[i] for i in indx_save])
-
+            """
             # Print progress
             print(f'{enum}/{len(data_loader)}')
+            #if enum == 7:
+             #   break;
+                
 
 
     def __len__(self):
@@ -272,22 +290,13 @@ class Proposals(torch.utils.data.Dataset):
         'Generates one sample of data'
         image_path = os.path.join(self.data_path, self.proposal_image_paths[idx])
 
-        # Crop image
-        image = Image.open(image_path)
-        left = self.proposal_box[idx][0]
-        top = self.proposal_box[idx][1]
-        right = self.proposal_box[idx][0]+self.proposal_box[idx][2]
-        bottom = self.proposal_box[idx][1]+self.proposal_box[idx][3]
-        image = image.crop((left, top, right, bottom))
-
         # Extract image and meta data
-        X = self.transform(image)
         y = self.proposal_class[idx]
         img_index = self.proposal_image_ids[idx]
         obj_index = self.proposal_object_ids[idx]
         box = self.proposal_box[idx]
         IoU = self.proposal_IoU[idx]
-        return X, y, img_index, obj_index, box, IoU
+        return image_path, y, img_index, obj_index, box, IoU
 
 
 
@@ -299,33 +308,31 @@ val_loader_taco = DataLoader(valset_taco, batch_size=1, shuffle=False, num_worke
 testset_taco = TACO(data = 'test', seed=seed)
 test_loader_taco = DataLoader(testset_taco, batch_size=1, shuffle=False, num_workers=0)
 
-size = 224
-train_test_transform = transforms.Compose([transforms.Resize((size, size)), 
-                                           transforms.ToTensor()])
 
-"""
+
 # save datasets
-train_dataset = Proposals(train_loader_taco, train_test_transform, "models/model.yml.gz", data_path=dataset_path,max_boxes=500, num_bg_examples=40)
-torch.save(train_dataset,'models/datasets/train_dataset_taco.pt')
+train_dataset = Proposals(train_loader_taco,  "models/model.yml.gz", data_path=dataset_path,max_boxes=2000, train_val=True)
+torch.save(train_dataset,'models/datasets/train_dataset_taco_v2.pt')
 print('Saved train dataset')
-val_dataset = Proposals(val_loader_taco, train_test_transform, "models/model.yml.gz", data_path=dataset_path,max_boxes=100)
-torch.save(val_dataset,'models/datasets/val_dataset_taco.pt')
+val_dataset = Proposals(val_loader_taco, "models/model.yml.gz", data_path=dataset_path,max_boxes=2000, train_val=True)
+torch.save(val_dataset,'models/datasets/val_dataset_taco_v2.pt')
 print('Saved val dataset')
-test_dataset = Proposals(test_loader_taco, train_test_transform, "models/model.yml.gz", data_path=dataset_path,max_boxes=100)
-torch.save(test_dataset,'models/datasets/test_dataset_taco.pt')
+
+test_dataset = Proposals(test_loader_taco,  "models/model.yml.gz", data_path=dataset_path,max_boxes=2000, train_val=False)
+torch.save(test_dataset,'models/datasets/test_dataset_taco_v2.pt')
 print('Saved test dataset')
-"""
+
 
 
 # Load train, val, and test datasets
-train_dataset = torch.load('models/datasets/train_dataset_taco.pt')
-val_dataset = torch.load('models/datasets/val_dataset_taco.pt')
-test_dataset = torch.load('models/datasets/test_dataset_taco.pt')
+train_dataset = torch.load('models/datasets/train_dataset_taco_v2.pt')
+val_dataset = torch.load('models/datasets/val_dataset_taco_v2.pt')
+test_dataset = torch.load('models/datasets/test_dataset_taco_v2.pt')
 
 
 # Include in data loader
-train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0)
-val_loader = DataLoader(val_dataset, batch_size=32, shuffle=True, num_workers=0)
+train_loader = DataLoader(train_dataset, batch_size=3000, shuffle=True, num_workers=0)
+val_loader = DataLoader(val_dataset, batch_size=3000, shuffle=True, num_workers=0)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=True, num_workers=0)
 
 
@@ -333,46 +340,83 @@ test_loader = DataLoader(test_dataset, batch_size=32, shuffle=True, num_workers=
 
 
 
+size = 224
+train_test_transform = transforms.Compose([transforms.Resize((size, size)), 
+                                           transforms.ToTensor()])
 
+model = models.resnet18(pretrained=True)
+#for param in model.parameters():
+#    param.requires_grad = False
 
-# Get model
-efficientnet = torch.hub.load('NVIDIA/DeepLearningExamples:torchhub', 'nvidia_efficientnet_b0', pretrained=True)
-# Freeze parameters for pretrained model (to avoid overfitting)
-for param in efficientnet.parameters():
-    param.requires_grad = False
-efficientnet.to(device)
+num_ftrs = model.fc.in_features
 
-# Change model classifier to hotdog/notdog (don't freeze params of last layer)
-num_ftrs = efficientnet.classifier.fc.in_features
-efficientnet.classifier.fc = nn.Linear(num_ftrs, 29)
+# Here the size of each output sample is set to 2.
+# Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
+model.fc = nn.Linear(num_ftrs, 29)
+model = model.to(device)
 
-# Set optimizer and model
-model = efficientnet.to(device)
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.0003)
+# Observe that all parameters are being optimized
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+
+# Decay LR by a factor of 0.1 every 7 epochs
+#exp_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.1)
 
 def loss_fun(output, target):
     crit = nn.CrossEntropyLoss()
     return crit(output, target)
 
 out_dict = {'train_acc': [],
-              'test_acc': [],
+              'val_acc': [],
               'train_loss': [],
-              'test_loss': []}
+              'val_loss': []}
 
-num_epochs = 2
+num_epochs = 50
+
+lowest_val_loss=1e10
+
 for epoch in tqdm(range(num_epochs), unit='epoch'):
     #For each epoch
     train_correct = 0
+    train_correct_class = {i:0 for i in range(29)}
+    train_num_class = {i:0 for i in range(29)}
     train_loss = []
     model.train()
-    for minibatch_no, (data, target, img_index, obj_index, box, IoU_val) in tqdm(enumerate(train_loader), total=len(train_loader)):
+    
+    for minibatch_no, (image_path, target, img_index, obj_index, box, IoU_val) in tqdm(enumerate(train_loader), total=len(train_loader)):
+        
+        # Downsample bg images
+        pos = np.arange(0,len(target),1)[target!=28]
+        if len(pos) == 0:
+            continue;
+        neg = np.arange(0,len(target),1)[target==28]
 
+        neg = np.random.permutation(neg)
+        neg = neg[:len(pos)*3].tolist()
+        pos = pos.tolist()
+        pos.extend(neg) 
+
+        target = target[pos]
+        img_index = img_index[pos]
+        obj_index = obj_index[pos]
+        box = [torch.tensor([box[0][p].item(),box[1][p].item(),box[2][p].item(),box[3][p].item()]) for p in pos]
+        IoU_val = IoU_val[pos]
+
+        data = []
+        for i in range(len(pos)):
+            # Crop image
+            image = Image.open(image_path[pos[i]])
+            left = box[i][0].item()
+            top = box[i][1].item()
+            right = box[i][0].item()+box[i][2].item()
+            bottom = box[i][1].item()+box[i][3].item()
+            image = image.crop((left, top, right, bottom))
+            X = train_test_transform(image)
+            data.append(X)
+
+        data = torch.stack(data,dim=0)
         data, target = data.to(device), target.to(device)
-        target = target + 1
-        target[target==30] = 28
+
         print(f'{minibatch_no+1}/{len(train_loader)}')
-        print(torch.min(target))
-        print(torch.max(target))
         #Zero the gradients computed for each weight
         optimizer.zero_grad()
         #Forward pass your image through the network
@@ -383,37 +427,91 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
         loss.backward()
         #Update the weights
         optimizer.step()
+        #exp_lr_scheduler.step()
         
         train_loss.append(loss.cpu().item())
         #Compute how many were correctly classified
         predicted = output.argmax(1)
         train_correct += (target==predicted).sum().cpu().item()
 
+        for i in range(29):
+            train_correct_class[i] += (target[target==i]==predicted[target==i]).sum().cpu().item()
+            train_num_class[i] += (target==i).sum().cpu().item()
+
+    
+
     #Comput the test accuracy
     model.eval()
-    test_loss = []
-    test_correct = 0
-    for minibatch_no, (data, target, img_index, obj_index, box, IoU_val) in enumerate(val_loader):
+    val_loss = []
+    val_correct = 0
+    val_correct_class = {i:0 for i in range(29)}
+    val_num_class = {i:0 for i in range(29)}
+
+    for minibatch_no, (image_path, target, img_index, obj_index, box, IoU_val) in enumerate(val_loader):
+        # Downsample bg images
+        pos = np.arange(0,len(target),1)[target!=28]
+        if len(pos) == 0:
+            continue;
+        neg = np.arange(0,len(target),1)[target==28]
+
+        neg = np.random.permutation(neg)
+        neg = neg[:len(pos)*3].tolist()
+        pos = pos.tolist()
+        pos.extend(neg) 
+
+        target = target[pos]
+        img_index = img_index[pos]
+        obj_index = obj_index[pos]
+        box = [torch.tensor([box[0][p].item(),box[1][p].item(),box[2][p].item(),box[3][p].item()]) for p in pos]
+        IoU_val = IoU_val[pos]
+
+        data = []
+        for i in range(len(pos)):
+            # Crop image
+            image = Image.open(image_path[pos[i]])
+            left = box[i][0].item()
+            top = box[i][1].item()
+            right = box[i][0].item()+box[i][2].item()
+            bottom = box[i][1].item()+box[i][3].item()
+            image = image.crop((left, top, right, bottom))
+            X = train_test_transform(image)
+            data.append(X)
+
+        data = torch.stack(data,dim=0)
+
         data, target = data.to(device), target.to(device)
-        target = target + 1
-        target[target==30] = 28
+
         with torch.no_grad():
             output = model(data)
-        test_loss.append(loss_fun(output, target).cpu().item())
+        val_loss.append(loss_fun(output, target).cpu().item())
         predicted = output.argmax(1)
-        test_correct += (target==predicted).sum().cpu().item()
+        val_correct += (target==predicted).sum().cpu().item()
+        for i in range(29):
+            val_correct_class[i] += (target[target==i]==predicted[target==i]).sum().cpu().item()
+            val_num_class[i] += (target==i).sum().cpu().item()
+        
         print(f'{minibatch_no+1}/{len(val_loader)}')
-    train_acc = train_correct/len(train_dataset)
-    test_acc = test_correct/len(test_dataset)
 
+    
+    train_acc = train_correct/(len(train_dataset))
+    val_acc = val_correct/(len(val_dataset))
+    for i in range(29):
+        if (train_num_class[i] != 0) & (val_num_class[i] != 0):
+            print(f'Class: {i} - Accuracy train: {train_correct_class[i]/train_num_class[i]*100:.1f}%\t test: {val_correct_class[i]/val_num_class[i]*100:.1f}%')
+
+    
     out_dict['train_acc'].append(train_correct/len(train_dataset))
-    out_dict['test_acc'].append(test_correct/len(test_dataset))
+    out_dict['val_acc'].append(val_correct/len(val_dataset))
     out_dict['train_loss'].append(np.mean(train_loss))
-    out_dict['test_loss'].append(np.mean(test_loss))
-    print("Accuracy train: {train:.1f}%\t test: {test:.1f}%".format(test=100*test_acc, train=100*train_acc))
+    out_dict['val_loss'].append(np.mean(val_loss))
+    print("Accuracy train: {train:.1f}%\t test: {test:.1f}%".format(test=100*val_acc, train=100*train_acc))
+
+    if np.mean(val_loss) < lowest_val_loss:
+        torch.save(model,os.path.join(os.getcwd(),'models/RCNN_model.pt'))
+        lowest_val_loss = np.mean(val_loss)
 
 
-torch.save(model)
+
 
 
 
