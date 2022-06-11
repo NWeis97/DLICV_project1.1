@@ -363,7 +363,7 @@ out_dict = {'train_acc': [],
 lowest_val_loss=1e10
 
 
-"""
+
 ###### Load already trained model #######
 print('Loading existing model')
 model_state_dict = torch.load(os.path.join(os.getcwd(),'models/RCNN_model_state_dict.pt'))
@@ -378,14 +378,14 @@ for key in out_dict.keys():
     
     out_dict[key] = new_list
 #########################################
-"""
+
 
 
 
 model = model.to(device)
 
 # Observe that all parameters are being optimized
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.003)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
 
 # Decay LR by a factor of 0.1 every 7 epochs
 #exp_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.1)
