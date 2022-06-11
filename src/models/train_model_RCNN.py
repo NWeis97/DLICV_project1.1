@@ -17,6 +17,7 @@ import torchvision.models as models
 import matplotlib.pyplot as plt
 import pdb
 import re
+import pandas as pd
 
 import cv2 as cv
 import numpy as np
@@ -309,7 +310,7 @@ testset_taco = TACO(data = 'test', seed=seed)
 test_loader_taco = DataLoader(testset_taco, batch_size=1, shuffle=False, num_workers=0)
 
 
-
+"""
 # save datasets
 train_dataset = Proposals(train_loader_taco,  "models/model.yml.gz", data_path=dataset_path,max_boxes=2000, train_val=True)
 torch.save(train_dataset,'models/datasets/train_dataset_taco_v2.pt')
@@ -321,7 +322,7 @@ print('Saved val dataset')
 test_dataset = Proposals(test_loader_taco,  "models/model.yml.gz", data_path=dataset_path,max_boxes=2000, train_val=False)
 torch.save(test_dataset,'models/datasets/test_dataset_taco_v2.pt')
 print('Saved test dataset')
-
+"""
 
 
 # Load train, val, and test datasets
@@ -353,10 +354,38 @@ num_ftrs = model.fc.in_features
 # Here the size of each output sample is set to 2.
 # Alternatively, it can be generalized to nn.Linear(num_ftrs, len(class_names)).
 model.fc = nn.Linear(num_ftrs, 29)
+
+out_dict = {'train_acc': [],
+              'val_acc': [],
+              'train_loss': [],
+              'val_loss': []}
+
+lowest_val_loss=1e10
+
+
+"""
+###### Load already trained model #######
+print('Loading existing model')
+model_state_dict = torch.load(os.path.join(os.getcwd(),'models/RCNN_model_state_dict.pt'))
+model.load_state_dict(model_state_dict)
+out_dict = pd.read_csv(os.path.join(os.getcwd(),'reports/training_RCNN.csv'),index_col=0)
+lowest_val_loss = out_dict['val_loss'].to_numpy()[-1]
+out_dict = out_dict.to_dict()
+for key in out_dict.keys():
+    new_list = []
+    for val in out_dict[key].values():
+        new_list.append(val)
+    
+    out_dict[key] = new_list
+#########################################
+"""
+
+
+
 model = model.to(device)
 
 # Observe that all parameters are being optimized
-optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)
+optimizer = torch.optim.AdamW(model.parameters(), lr=0.003)
 
 # Decay LR by a factor of 0.1 every 7 epochs
 #exp_lr_scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.1)
@@ -365,14 +394,9 @@ def loss_fun(output, target):
     crit = nn.CrossEntropyLoss()
     return crit(output, target)
 
-out_dict = {'train_acc': [],
-              'val_acc': [],
-              'train_loss': [],
-              'val_loss': []}
 
-num_epochs = 50
 
-lowest_val_loss=1e10
+num_epochs = 25
 
 for epoch in tqdm(range(num_epochs), unit='epoch'):
     #For each epoch
@@ -384,7 +408,7 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
     
     for minibatch_no, (image_path, target, img_index, obj_index, box, IoU_val) in tqdm(enumerate(train_loader), total=len(train_loader)):
         
-        # Downsample bg images
+        ################## Downsample bg images ###################
         pos = np.arange(0,len(target),1)[target!=28]
         if len(pos) == 0:
             continue;
@@ -401,8 +425,9 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
         box = [torch.tensor([box[0][p].item(),box[1][p].item(),box[2][p].item(),box[3][p].item()]) for p in pos]
         IoU_val = IoU_val[pos]
 
+        # BELOW CODE SHOULD BE USED FOR MAKING "DATA" OBJECT FROM IMAGE_PATHS
         data = []
-        for i in range(len(pos)):
+        for i in range(len(target)):
             # Crop image
             image = Image.open(image_path[pos[i]])
             left = box[i][0].item()
@@ -414,6 +439,8 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
             data.append(X)
 
         data = torch.stack(data,dim=0)
+        #############################################################
+
         data, target = data.to(device), target.to(device)
 
         print(f'{minibatch_no+1}/{len(train_loader)}')
@@ -438,7 +465,6 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
             train_correct_class[i] += (target[target==i]==predicted[target==i]).sum().cpu().item()
             train_num_class[i] += (target==i).sum().cpu().item()
 
-    
 
     #Comput the test accuracy
     model.eval()
@@ -491,66 +517,30 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
             val_num_class[i] += (target==i).sum().cpu().item()
         
         print(f'{minibatch_no+1}/{len(val_loader)}')
-
     
-    train_acc = train_correct/(len(train_dataset))
-    val_acc = val_correct/(len(val_dataset))
+
+    train_acc = train_correct/(sum(train_num_class.values()))
+    val_acc = val_correct/(sum(val_num_class.values()))
     for i in range(29):
         if (train_num_class[i] != 0) & (val_num_class[i] != 0):
             print(f'Class: {i} - Accuracy train: {train_correct_class[i]/train_num_class[i]*100:.1f}%\t test: {val_correct_class[i]/val_num_class[i]*100:.1f}%')
 
-    
-    out_dict['train_acc'].append(train_correct/len(train_dataset))
-    out_dict['val_acc'].append(val_correct/len(val_dataset))
+
+    out_dict['train_acc'].append(train_correct/(sum(train_num_class.values())))
+    out_dict['val_acc'].append(val_correct/(sum(val_num_class.values())))
     out_dict['train_loss'].append(np.mean(train_loss))
     out_dict['val_loss'].append(np.mean(val_loss))
+
+    # Save training data
+    pd_save = pd.DataFrame.from_dict(out_dict)
+    pd_save.to_csv(os.path.join(os.getcwd(),'reports/training_RCNN.csv'))
     print("Accuracy train: {train:.1f}%\t test: {test:.1f}%".format(test=100*val_acc, train=100*train_acc))
 
+    # Save model if validation loss is lower than current best
     if np.mean(val_loss) < lowest_val_loss:
-        torch.save(model,os.path.join(os.getcwd(),'models/RCNN_model.pt'))
+        torch.save(model.state_dict(),os.path.join(os.getcwd(),'models/RCNN_model_state_dict.pt'))
         lowest_val_loss = np.mean(val_loss)
+        print(f'New best model - Model saved')
 
 
 
-
-
-
-#### TASK 3 #####
-
-model = torch.load("model")
-model.eval()
-test_loss = []
-test_correct = 0
-for minibatch_no, (data, target, img_index, obj_index, box, IoU_val) in enumerate(test_loader):
-    data, target = data.to(device), target.to(device)
-    target = target + 1
-    target[target==30] = 28
-    with torch.no_grad():
-        output = model(data) #64*29
-        output = nn.softmax(output,dim=1) # softmax to get probs
-
-    
-    # within each image
-        # FOr each class
-            # Sort proposals according to prob of class
-            # Remove proposals with p lower than 'threshold'
-            # for each (sorted) prop going from largest prob to lowest
-                #Calc IoU to all other proposals
-                #Remove those with IoU over k
-
-    test_loss.append(loss_fun(output, target).cpu().item())
-    predicted = output.argmax(1)
-    test_correct += (target==predicted).sum().cpu().item()
-    print(f'{minibatch_no+1}/{len(val_loader)}')
-
-# Output list of proposals with class and prob
-# ...
-
-
-#### TASK 4 #####
-# Input: list of proposals with class and prob
-
-
-
-#### Task 5 ####
-# Make code for visualizing objects and detections for an image
