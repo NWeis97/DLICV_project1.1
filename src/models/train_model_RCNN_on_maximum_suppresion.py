@@ -213,7 +213,7 @@ train_test_transform = transforms.Compose([transforms.Resize((size, size)),
                                            transforms.ToTensor()])
 
 
-results = {
+results_list_2 = {
     "target": [],
     "img_index": [],
     "obj_index": [],
@@ -254,47 +254,48 @@ for minibatch_no, (image_path, target, img_index, obj_index, box, IoU_val) in tq
     pred = output.argmax(dim=1)
     probs = output[np.arange(0,output.shape[0],1),pred]
 
-    results['target'].extend(target.cpu().numpy().tolist())
-    results['img_index'].extend(img_index.cpu().numpy().tolist())
-    results['obj_index'].extend(obj_index.cpu().numpy().tolist())
-    results['box'].extend([b.cpu().numpy().tolist() for b in box])
-    results['probs'].extend(probs.cpu().detach().numpy().tolist())
-    results['pred'].extend(pred.cpu().detach().numpy().tolist())
-    results['IoU_to_GT'].extend(IoU_val.cpu().detach().numpy().tolist())
+    results_list_2['target'].extend(target.cpu().numpy().tolist())
+    results_list_2['img_index'].extend(img_index.cpu().numpy().tolist())
+    results_list_2['obj_index'].extend(obj_index.cpu().numpy().tolist())
+    results_list_2['box'].extend([b.cpu().numpy().tolist() for b in box])
+    results_list_2['probs'].extend(probs.cpu().detach().numpy().tolist())
+    results_list_2['pred'].extend(pred.cpu().detach().numpy().tolist())
+    results_list_2['IoU_to_GT'].extend(IoU_val.cpu().detach().numpy().tolist())
 
     print(f'{minibatch_no}/{len(test_loader)}')
-    if minibatch_no == 60:
-        break;
-
-
-results = pd.DataFrame.from_dict(results).sort_values(['img_index'])
-results_dict = {}
-j_count = 0
-prob_min = 0.8
-
-for j in results['img_index'].unique():
-    if results[(results['img_index']==j) & ((results['pred']!=28) | (results['target']<28)) & (results['probs']>prob_min)].empty == False:
-        results_dict[j_count]= results[(results['img_index']==j) & (((results['pred']!=28) & (results['probs']>prob_min)) | (results['target']!=28))].reset_index().drop(columns='index')
-        for i in range(len(results_dict[j_count])):
-            results_dict[j_count]['box'][i][2] = results_dict[j_count]['box'][i][0]+results_dict[j_count]['box'][i][2]
-            results_dict[j_count]['box'][i][3] = results_dict[j_count]['box'][i][1]+results_dict[j_count]['box'][i][3]
-        
-        j_count += 1
-
-
-
-iou_threshold = 0.5
-for ix in range(len(results_dict.keys())):
-    boxes = torch.tensor(results_dict[ix]['box']).float()
-    scores = torch.tensor(results_dict[ix]['probs']).float()
-    idxs = torch.tensor(results_dict[ix]['pred']).int()
-    out = batched_nms(boxes, scores, idxs,iou_threshold)
-
-    results_dict[ix] = results_dict[ix].iloc[out.numpy()].reset_index().drop(columns='index')
+    if (minibatch_no+1) % 10 == 0:
+        print(f'Saving updated version of results')
+        results = pd.DataFrame.from_dict(results_list_2).sort_values(['img_index'])
+        results_dict = {}
+        j_count = 0
+        prob_min = 0.5
+        pdb.set_trace()
+        for j in results['img_index'].unique():
+            if results[(results['img_index']==j) & (((results['pred']!=28) & (results['probs']>prob_min)))].empty == False:
+                results_dict[j_count]= results[(results['img_index']==j) & (((results['pred']!=28) & (results['probs']>prob_min)))].reset_index().drop(columns='index')
+                for i in range(len(results_dict[j_count])):
+                    results_dict[j_count]['box'][i][2] = results_dict[j_count]['box'][i][0]+results_dict[j_count]['box'][i][2]
+                    results_dict[j_count]['box'][i][3] = results_dict[j_count]['box'][i][1]+results_dict[j_count]['box'][i][3]
+                
+                j_count += 1
 
 
 
-results_df = pd.concat(results_dict,axis=0).reset_index().drop(columns=['level_0','level_1'])
-results_df.to_csv('reports/RCCN_res_after_nms.csv')
+        iou_threshold = 0.5
+        for ix in range(len(results_dict.keys())):
+            boxes = torch.tensor(results_dict[ix]['box']).float()
+            scores = torch.tensor(results_dict[ix]['probs']).float()
+            idxs = torch.tensor(results_dict[ix]['pred']).int()
+            out = batched_nms(boxes, scores, idxs,iou_threshold)
+
+            results_dict[ix] = results_dict[ix].iloc[out.numpy()].reset_index().drop(columns='index')
+
+
+
+        results_df = pd.concat(results_dict,axis=0).reset_index().drop(columns=['level_0','level_1'])
+        results_df.to_csv('reports/RCCN_res_after_nms.csv')
+
+
+
 
 
