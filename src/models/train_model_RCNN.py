@@ -332,6 +332,7 @@ test_dataset = torch.load('models/datasets/test_dataset_taco_v2.pt')
 
 
 # Include in data loader
+torch.manual_seed(98765)
 train_loader = DataLoader(train_dataset, batch_size=3000, shuffle=True, num_workers=0)
 val_loader = DataLoader(val_dataset, batch_size=3000, shuffle=True, num_workers=0)
 test_loader = DataLoader(test_dataset, batch_size=32, shuffle=True, num_workers=0)
@@ -366,9 +367,9 @@ lowest_val_loss=1e10
 
 ###### Load already trained model #######
 print('Loading existing model')
-model_state_dict = torch.load(os.path.join(os.getcwd(),'models/RCNN_model_state_dict.pt'))
+model_state_dict = torch.load(os.path.join(os.getcwd(),'models/RCNN_model_state_dict_v2.pt'))
 model.load_state_dict(model_state_dict)
-out_dict = pd.read_csv(os.path.join(os.getcwd(),'reports/training_RCNN.csv'),index_col=0)
+out_dict = pd.read_csv(os.path.join(os.getcwd(),'reports/training_RCNN_v2.csv'),index_col=0)
 lowest_val_loss = out_dict['val_loss'].to_numpy()[-1]
 out_dict = out_dict.to_dict()
 for key in out_dict.keys():
@@ -377,6 +378,9 @@ for key in out_dict.keys():
         new_list.append(val)
     
     out_dict[key] = new_list
+
+#New seed for training since the
+np.random.seed(98765)
 #########################################
 
 
@@ -397,6 +401,8 @@ def loss_fun(output, target):
 
 
 num_epochs = 25
+
+
 
 for epoch in tqdm(range(num_epochs), unit='epoch'):
     #For each epoch
@@ -533,12 +539,12 @@ for epoch in tqdm(range(num_epochs), unit='epoch'):
 
     # Save training data
     pd_save = pd.DataFrame.from_dict(out_dict)
-    pd_save.to_csv(os.path.join(os.getcwd(),'reports/training_RCNN.csv'))
+    pd_save.to_csv(os.path.join(os.getcwd(),'reports/training_RCNN_v2.csv'))
     print("Accuracy train: {train:.1f}%\t test: {test:.1f}%".format(test=100*val_acc, train=100*train_acc))
 
     # Save model if validation loss is lower than current best
     if np.mean(val_loss) < lowest_val_loss:
-        torch.save(model.state_dict(),os.path.join(os.getcwd(),'models/RCNN_model_state_dict.pt'))
+        torch.save(model.state_dict(),os.path.join(os.getcwd(),'models/RCNN_model_state_dict_v2.pt'))
         lowest_val_loss = np.mean(val_loss)
         print(f'New best model - Model saved')
 
