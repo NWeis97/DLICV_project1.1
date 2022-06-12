@@ -271,9 +271,10 @@ results = pd.DataFrame.from_dict(results).sort_values(['img_index'])
 results_dict = {}
 j_count = 0
 prob_min = 0.8
+
 for j in results['img_index'].unique():
-    if results[(results['img_index']==j) & (results['pred']!=28)].empty == False:
-        results_dict[j_count]= results[(results['img_index']==j) & (results['pred']!=28) & (results['probs']>prob_min)].reset_index().drop(columns='index')
+    if results[(results['img_index']==j) & ((results['pred']!=28) | (results['target']<28)) & (results['probs']>prob_min)].empty == False:
+        results_dict[j_count]= results[(results['img_index']==j) & (((results['pred']!=28) & (results['probs']>prob_min)) | (results['target']!=28))].reset_index().drop(columns='index')
         for i in range(len(results_dict[j_count])):
             results_dict[j_count]['box'][i][2] = results_dict[j_count]['box'][i][0]+results_dict[j_count]['box'][i][2]
             results_dict[j_count]['box'][i][3] = results_dict[j_count]['box'][i][1]+results_dict[j_count]['box'][i][3]
